@@ -1,10 +1,30 @@
 package preventlists
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"strings"
 
+	auth "github.com/danjamf/terraform-provider-jamfprotect/internal"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
+
+type ResponseCreate struct {
+	Data struct {
+		PreventListCreate PreventList `json:"createPreventList"`
+	} `json:"data"`
+}
+
+type PreventListCreate struct {
+	ID          string   `json:"id"`
+	Created     string   `json:"created"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	List        []string `json:"list"`
+	Description string   `json:"description"`
+}
 
 // Resource definition (this is where you'll manage state, create/update resources)
 func ResourcePreventlists() *schema.Resource {
@@ -15,9 +35,31 @@ func ResourcePreventlists() *schema.Resource {
 		Delete: resourceExampleDelete,
 
 		Schema: map[string]*schema.Schema{
-			"name": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+			"name": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "The name identifier of the prevent list",
+			},
+			"id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The unique identifier of the prevent list",
+			},
+			"type": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "The type of the prevent list. SIGNINGID, CDHASH, FILEHASH, or TEAMID are the only acceptable values",
+			},
+			"description": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "The description of the prevent list",
+			},
+			"list": {
+				Type:        schema.TypeList,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Optional:    true,
+				Description: "The list of the prevent list",
 			},
 		},
 	}
@@ -26,12 +68,70 @@ func ResourcePreventlists() *schema.Resource {
 func resourceExampleCreate(d *schema.ResourceData, m interface{}) error {
 	// Create the resource (for example, make an API call to create the resource)
 	name := d.Get("name").(string)
+	typevar := d.Get("type").(string)
+	description := d.Get("description").(string)
+
 	fmt.Printf("Creating resource with name: %s\n", name)
+	fmt.Printf("Creating resource with type: %s\n", typevar)
+	fmt.Printf("Creating resource with description: %s\n", description)
+	listsInterface := d.Get("list").([]interface{}) // Get the raw slice of interfaces
 
+	// Now convert each element of the slice to a string
+	list := make([]string, len(listsInterface)) // Create a string slice with the same length
+
+	for i, v := range listsInterface {
+		list[i] = "\\\"" + v.(string) + "\\\"" // Assert each element as a string
+	}
+	fmt.Printf("Creating resource with list: %s\n", list)
+
+	graphpayload := "{\"query\":\"mutation createpeeventlist { createPreventList(    input:  {     name: \\\"" + name + "\\\"    description: \\\"" + description + "\\\"     tags: []      type: " + typevar + "      list: [\\\"test\\\",\\\"test2\\\"]     }){name    description    id    type  }}\",\"variables\":{}}"
+	fmt.Printf(graphpayload)
+	graphpayloadnew := "{\"query\":\"mutation createpeeventlist { createPreventList(    input:  {     name: \\\"" + name + "\\\"    description: \\\"" + description + "\\\"     tags: []      type: " + typevar + "      list: [" + strings.Join(list, ", ") + "]     }){name    description    id    type  }}\",\"variables\":{}}"
+	fmt.Printf(graphpayloadnew)
+	req, err := http.NewRequest("POST", "https://protecturl/graphql", strings.NewReader(graphpayloadnew))
+	if err != nil {
+		return (fmt.Errorf("error converting making http request body"))
+	}
+	resp, err := auth.MakeRequest((req))
+
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	bodyread, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	fmt.Println("Response body:", string(bodyread))
+	// Check the response status code
+	if resp.StatusCode != http.StatusOK {
+		return (fmt.Errorf("failed to read preventlists info: %s", resp.Status))
+	}
+
+	// Create a variable to hold the unmarshalled response
+	var response ResponseCreate
+
+	// Unmarshal the JSON data into the struct
+	errjsonmarshal := json.Unmarshal(bodyread, &response)
+	if errjsonmarshal != nil {
+
+		return (errjsonmarshal)
+	}
+	d.Set("name", response.Data.PreventListCreate.Name)
+	fmt.Println("is there a name?")
+	fmt.Println(response.Data.PreventListCreate.Name)
+	fmt.Println("is there a description?")
+	d.Set("description", response.Data.PreventListCreate.Description)
+	fmt.Println(response.Data.PreventListCreate.Description)
+	fmt.Println("is there a type?")
+	d.Set("type", response.Data.PreventListCreate.Type)
+	fmt.Println(response.Data.PreventListCreate.Type)
+	d.SetId(response.Data.PreventListCreate.ID)
 	// Set the resource ID
-	d.SetId(name) // The ID is used by Terraform to track the resource
-
-	return resourceExampleRead(d, m)
+	return nil
+	//return resourceExampleRead(d, m)
 }
 
 func resourceExampleRead(d *schema.ResourceData, m interface{}) error {
@@ -40,6 +140,7 @@ func resourceExampleRead(d *schema.ResourceData, m interface{}) error {
 	fmt.Printf("Reading resource with ID: %s\n", name)
 
 	// Return current state (for now, just set the name as the resource ID)
+	// need to implement read logic
 	d.Set("name", name)
 	return nil
 }
@@ -49,18 +150,42 @@ func resourceExampleUpdate(d *schema.ResourceData, m interface{}) error {
 	name := d.Get("name").(string)
 	fmt.Printf("Updating resource with name: %s\n", name)
 
-	// Update logic here (if needed)
+	// need to implement update logic
 
 	return resourceExampleRead(d, m)
 }
 
 func resourceExampleDelete(d *schema.ResourceData, m interface{}) error {
 	// Delete the resource (e.g., make an API call to delete the resource)
-	name := d.Id()
-	fmt.Printf("Deleting resource with ID: %s\n", name)
+	name := d.Get("name").(string)
+	fmt.Printf("Deleting resource with name: %s\n", name)
+	fmt.Printf("Deleting resource with ID: %s\n", d.Id())
 
 	// Delete logic here (if needed)
 
+	graphpayload := "{\"query\":\"mutation deletePreventList {  deletePreventList(id: \\\"" + d.Id() + "\\\")  {name    description    id    type  }}\",\"variables\":{}}"
+
+	req, err := http.NewRequest("POST", "https://protecturl/graphql", strings.NewReader(graphpayload))
+	if err != nil {
+		return (fmt.Errorf("error converting making http request body"))
+	}
+	resp, err := auth.MakeRequest((req))
+
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	bodyread, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	fmt.Println("Response body:", string(bodyread))
+	// Check the response status code
+	if resp.StatusCode != http.StatusOK {
+		return (fmt.Errorf("failed to read preventlists info: %s", resp.Status))
+	}
 	// Remove resource from state
 	d.SetId("")
 	return nil

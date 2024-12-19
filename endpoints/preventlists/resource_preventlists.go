@@ -49,6 +49,25 @@ func ResourcePreventlists() *schema.Resource {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "The type of the prevent list. SIGNINGID, CDHASH, FILEHASH, or TEAMID are the only acceptable values",
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					validValues := []string{"CDHASH", "TEAMID", "FILEHASH", "SIGNINGID"}
+					value := val.(string)
+
+					// Check if the value is valid
+					isValid := false
+					for _, validValue := range validValues {
+						if value == validValue {
+							isValid = true
+							break
+						}
+					}
+
+					if !isValid {
+						errs = append(errs, fmt.Errorf("%s must be one of %v", key, validValues))
+					}
+
+					return warns, errs
+				},
 			},
 			"description": {
 				Type:        schema.TypeString,
@@ -129,28 +148,107 @@ func resourceExampleCreate(d *schema.ResourceData, m interface{}) error {
 	d.Set("type", response.Data.PreventListCreate.Type)
 	fmt.Println(response.Data.PreventListCreate.Type)
 	d.SetId(response.Data.PreventListCreate.ID)
-	// Set the resource ID
 	return nil
 	//return resourceExampleRead(d, m)
 }
 
 func resourceExampleRead(d *schema.ResourceData, m interface{}) error {
 	// Read the resource data (e.g., make an API call to fetch resource details)
-	name := d.Id()
-	fmt.Printf("Reading resource with ID: %s\n", name)
+	resourceid := d.Id()
+	fmt.Printf("Reading resource with ID: %s\n", resourceid)
 
-	// Return current state (for now, just set the name as the resource ID)
-	// need to implement read logic
-	d.Set("name", name)
+	graphpayload := "{\"query\":\"query getPreventList {getPreventList(id: \\\"" + d.Get("id").(string) + "\\\") {id,created,name,type,list,description}}\"}"
+
+	req, err := http.NewRequest("POST", "https://protecturl/graphql", strings.NewReader(graphpayload))
+	if err != nil {
+		return (fmt.Errorf("error converting making http request body"))
+	}
+	resp, err := auth.MakeRequest((req))
+
+	if err != nil {
+		return (err)
+	}
+	defer resp.Body.Close()
+
+	bodyread, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	fmt.Println("Response body:", string(bodyread))
+	// Check the response status code
+	if resp.StatusCode != http.StatusOK {
+		return (fmt.Errorf("failed to read preventlists info: %s", resp.Status))
+	}
+
+	// Parse the response JSON if needed
+	// (this depends on the structure of the API response)
+	fmt.Print("nxt is string of body.. come onnnn.")
+	//fmt.Println(string(body))
+
+	// Create a variable to hold the unmarshalled response
+	var response Response
+
+	// Unmarshal the JSON data into the struct
+	errjsonmarshal := json.Unmarshal(bodyread, &response)
+	if errjsonmarshal != nil {
+
+		return (errjsonmarshal)
+	}
+	d.Set("name", response.Data.GetPreventList.Name)
+	fmt.Println("is there a name?")
+	fmt.Println(response.Data.GetPreventList.Name)
+	fmt.Println("is there a description?")
+	d.Set("description", response.Data.GetPreventList.Description)
+	fmt.Println(response.Data.GetPreventList.Description)
+	fmt.Println("is there a type?")
+	d.Set("type", response.Data.GetPreventList.Type)
+	fmt.Println(response.Data.GetPreventList.Type)
+	d.SetId(response.Data.GetPreventList.ID)
 	return nil
 }
 
 func resourceExampleUpdate(d *schema.ResourceData, m interface{}) error {
 	// Update the resource (e.g., make an API call to update the resource)
 	name := d.Get("name").(string)
-	fmt.Printf("Updating resource with name: %s\n", name)
+	typevar := d.Get("type").(string)
+	description := d.Get("description").(string)
 
-	// need to implement update logic
+	fmt.Printf("Updating resource with name: %s\n", name)
+	fmt.Printf("Updating resource with type: %s\n", typevar)
+	fmt.Printf("Updating resource with description: %s\n", description)
+	listsInterface := d.Get("list").([]interface{}) // Get the raw slice of interfaces
+
+	// Now convert each element of the slice to a string
+	list := make([]string, len(listsInterface)) // Create a string slice with the same length
+
+	for i, v := range listsInterface {
+		list[i] = "\\\"" + v.(string) + "\\\"" // Assert each element as a string
+	}
+	fmt.Printf("Updating resource with list: %s\n", list)
+	graphpayload := "{\"query\":\"mutation updatePreventList {  updatePreventList(  input:  {    name: \\\"" + name + "\\\"      description: \\\"" + description + "\\\"      tags: []     type: " + typevar + "      list: [" + strings.Join(list, ", ") + "]      }  id: \\\"" + d.Id() + "\\\"){id  }}\",\"variables\":{}}"
+	fmt.Printf(graphpayload)
+	req, err := http.NewRequest("POST", "https://protecturl/graphql", strings.NewReader(graphpayload))
+	if err != nil {
+		return (fmt.Errorf("error converting making http request body"))
+	}
+	resp, err := auth.MakeRequest((req))
+
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	bodyread, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	fmt.Println("Response body:", string(bodyread))
+	// Check the response status code
+	if resp.StatusCode != http.StatusOK {
+		return (fmt.Errorf("failed to update preventlists info: %s", resp.Status))
+	}
 
 	return resourceExampleRead(d, m)
 }
@@ -184,7 +282,7 @@ func resourceExampleDelete(d *schema.ResourceData, m interface{}) error {
 	fmt.Println("Response body:", string(bodyread))
 	// Check the response status code
 	if resp.StatusCode != http.StatusOK {
-		return (fmt.Errorf("failed to read preventlists info: %s", resp.Status))
+		return (fmt.Errorf("failed to delete preventlists info: %s", resp.Status))
 	}
 	// Remove resource from state
 	d.SetId("")

@@ -1,3 +1,7 @@
+This functionality has been abosorbed into [JSC Provider](https://github.com/danjamf/terraform-provider-jsctfprovider)
+
+This repo is no longer maintained 
+
 # terraform-provider-jamfprotect
 
 Example TF for Jamf Protect
